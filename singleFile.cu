@@ -2199,10 +2199,7 @@ int main() {
 	printf("SB_BinaryStats_diff_longstretch1_CUDA %f\n", result_11);
     double result_12 = MD_hrv_classic_pnn40(y, size); //No need to print as it is already done in the function. The result will be shown below by the virue of the function.
     //printf("MD_hrv_classic_pnn40 %f\n", result_12);
-    double result_15 = hist5(y, size);
-	printf("hist5 %f\n", result_15);
-    double result_16 = hist10(y, size);
-	printf("hist5 %f\n", result_16);
+
     double result_13 = periodicity_wang(y, size);
 	printf("periodicity_wang %f\n", result_13);
     //motifthree14
@@ -2212,6 +2209,10 @@ int main() {
 	// printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
     //double result_4 = SB_TransitionMatrix_3ac_sumdiagcov(y, size, autocorr_d);
     //printf("SB_TransitionMatrix_3ac_sumdiagcov : %f\n", result_4);
+        // double result_15 = hist5(y, size);
+	// printf("hist5 %f\n", result_15);
+    // double result_16 = hist10(y, size);
+	// printf("hist5 %f\n", result_16);
     // double sign = 1.0;
     // double result_17 = DN_OutlierInclude_np_001_mdrmd_CUDA(y, size, sign);
     // printf("The OutlierInclude_np_001_mdrmd is %f\n", result_17);
