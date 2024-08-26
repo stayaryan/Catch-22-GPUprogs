@@ -19,6 +19,7 @@
 #include "stats.h"
 #include<bits/stdc++.h>
 #include <vector>
+//#include "Histogram5.cu"
 
 // #include "stats.h"
 // #include "fft.h"
@@ -2131,6 +2132,139 @@ __global__ void initialize_array(double *d_T, const int numGroups){
     }
 }
 
+
+__global__ void calc_words_len1(int *d_yt, int *d_r1, int *d_sizes_r1, int size, int alphabet_sizes){
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i<alphabet_sizes){
+        int r_idx = 0;
+        for (int j = 0; j < size; j++) {
+            if (d_yt[j] == i + 1) {
+                d_r1[i * size + r_idx] = j;
+                r_idx++;
+            }
+        }
+        d_sizes_r1[i] = r_idx;
+    }
+
+}
+__global__ void calc_words_len2(int alphabet_size, int *d_sizes_r2, int size, int *d_sizes_r1, int *d_yt, int *d_r1, int *d_r2, double *d_out2){
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i<alphabet_size){
+        for(int j=0;j<alphabet_size;j++){
+            d_sizes_r2[i*alphabet_size + j] = 0;
+            int dynamic_idx = 0;
+
+            for(int k=0;k<d_sizes_r1[i];k++){
+                int tmp_idx = d_yt[d_r1[i*size + k + 1]];
+
+                if(tmp_idx == (j+1)){
+                    d_r2[i*alphabet_size*d_sizes_r1[i] + j*d_sizes_r1[i] + dynamic_idx] = d_r1[i*size + k];
+                    dynamic_idx++;
+
+                    d_sizes_r2[i*alphabet_size + j]++;
+                }
+            }
+
+            double tmp = (double)d_sizes_r2[i*alphabet_size+j] / ((double)(size)-(double)(1.0));
+            d_out2[i*alphabet_size + j] = tmp;
+        }
+    }
+}
+double f_entropy(const double a[], const int size)
+{
+    double f = 0.0;
+    for (int i = 0; i < size; i++) {
+        if (a[i] > 0) {
+            f += a[i] * log(a[i]);
+        }
+    }
+    return -1 * f;
+}
+double SB_MotifThree_quantile_hh(const double y[], const int size){
+    int threadsPerBlock1 = 256;
+    int blocks1 = (size + threadsPerBlock1 - 1) / threadsPerBlock1;
+    int *h_yt = (int*)malloc(size * sizeof(int)), *d_yt;
+    cudaMalloc(&d_yt, size*sizeof(int));
+    double hh = 0;// answer to be returned
+    
+    //coarsegrain
+    sb_coarsegrain(y, size, "quantile", 3, h_yt);
+    cudaMemcpy(d_yt, h_yt, size*sizeof(int), cudaMemcpyHostToDevice);
+    //cudaMemcpy(&h_ySub, d_ySub, size*sizeof(double), cudaMemcpyDeviceToHost);
+
+    int alphabet_size = 3, array_size = alphabet_size;
+    //int tmp_idx, r_idx, dynamic_idx;
+    //declaring the 2d arrays
+    //dim3 threadsPerBlock2(16, 16);
+    //dim3 blocks2((alphabet_size + threadsPerBlock2.x - 1) / threadsPerBlock2.x, (size + threadsPerBlock2.y - 1) / threadsPerBlock2.y);
+
+    int *d_r1;
+    int lengthd_r1 = array_size*size*sizeof(int);
+    cudaMalloc(&d_r1, lengthd_r1);
+    int *h_r1 = (int*)malloc(lengthd_r1);// for(int i=0;i<array_size;i++)h_r1[i] = (int*)malloc(size*sizeof(int));
+
+    //declaring sizes_r1
+    int *h_sizes_r1 = (int*)malloc(array_size*sizeof(int));
+    int *d_sizes_r1; cudaMalloc(&d_sizes_r1, array_size*sizeof(int));
+
+    calc_words_len1<<<blocks1, threadsPerBlock1>>>(d_yt, d_r1, d_sizes_r1, size, alphabet_size);
+    
+    cudaMemcpy(h_r1, d_r1, lengthd_r1, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_sizes_r1, d_sizes_r1, array_size*sizeof(int), cudaMemcpyDeviceToHost);
+    // for(int i=0;i<lengthd_r1;i++){
+    //     printf("%d\t", h_r1[i]);
+    // }
+
+    //array_size *= alphabet_size;
+    for(int i=0;i<alphabet_size;i++){
+        if(h_sizes_r1[i]!=0 && h_r1[i*size+(h_sizes_r1[i]-1)] == (size-1)){
+            int *tmp = (int*)malloc(h_sizes_r1[i]*sizeof(int));
+            for(int j=0;j<h_sizes_r1[i];j++){
+                tmp[j] = h_r1[i*size + j]; 
+            }
+
+            for(int j=0;j<(h_sizes_r1[i]-1);j++){
+                h_r1[i*size + j] = tmp[j];
+            }
+
+            h_sizes_r1[i]--;
+        }
+    }
+    // int *nd_sizes_r1; cudaMalloc(&nd_sizes_r1, );
+    cudaMemcpy(d_sizes_r1, h_sizes_r1, array_size*sizeof(int), cudaMemcpyHostToDevice);
+    // for(int i=0;i<lengthd_r1;i++){
+    //     printf("%d\t", h_r1[i]);
+    // }
+
+
+    //Declaring 3d matrices as 1d
+    int lengthd_r2 = alphabet_size*alphabet_size*size*sizeof(int);
+    int lengthd_sizes_r2 = alphabet_size*alphabet_size*sizeof(int);
+    int lengthd_out2 = alphabet_size*alphabet_size*sizeof(double);
+
+    int *h_r2 = (int*)malloc(lengthd_r2), *d_r2; cudaMalloc(&d_r2, lengthd_r2);
+    int *h_sizes_r2 = (int*)malloc(lengthd_sizes_r2), *d_sizes_r2; cudaMalloc(&d_sizes_r2, lengthd_sizes_r2);
+    double *h_out2 = (double*)malloc(lengthd_out2), *d_out2; cudaMalloc(&d_out2, lengthd_out2);
+
+    calc_words_len2<<<blocks1, threadsPerBlock1>>>(alphabet_size, d_sizes_r2, size, d_sizes_r1, d_yt, d_r1, d_r2, d_out2);
+
+    cudaMemcpy(h_out2, d_out2, lengthd_out2, cudaMemcpyDeviceToHost);
+    // for(int i=0;i<lengthd_out2;i++){
+    //     printf("%.2f\t", h_out2[i]);
+    // }
+
+    for(int i=0;i<alphabet_size;i++){
+        for(int j=0;j<alphabet_size;j++){
+            double ele = h_out2[i*alphabet_size + j];
+            if(ele>0){
+                hh+=(ele)*log(ele);
+            }
+        }
+    }
+    return (-2)*hh;
+
+}
+
 int main() {
     //cudaEvent_t start, stop;
     //cudaEventCreate(&start);
@@ -2179,8 +2313,8 @@ int main() {
     printf("CO_trev_num1 : %.14f\n", result_2);
     double result_3 = CO_Embed2_Dist_tau_d_expfit_meandiff(y, size, autocorr_d);
     printf("CO_Embed2_Dist_tau_d_expfit_meandiff : %f\n", result_3);
-    double result_21 = CO_HistogramAMI_even_2_5(y, size);
-	printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
+    // double result_21 = CO_HistogramAMI_even_2_5(y, size);
+	// printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
 
 
     double result_5 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 2, "dfa");
@@ -2199,20 +2333,23 @@ int main() {
 	printf("SB_BinaryStats_diff_longstretch1_CUDA %f\n", result_11);
     double result_12 = MD_hrv_classic_pnn40(y, size); //No need to print as it is already done in the function. The result will be shown below by the virue of the function.
     //printf("MD_hrv_classic_pnn40 %f\n", result_12);
-
+        double result_14 = SB_MotifThree_quantile_hh(y, size);
+	printf("motifthree %f\n", result_14);
     double result_13 = periodicity_wang(y, size);
 	printf("periodicity_wang %f\n", result_13);
     //motifthree14
+
+    // double result_15 = hist5(y, size);
+	// printf("hist5 %f\n", result_15);
+    // double result_16 = hist10(y, size);
+	// printf("hist5 %f\n", result_16);
     // double result_19 = FC_LocalSimple_mean_tauresrat_CUDA(y,size,1, autocorr_d);
 	// printf("FC_LocalSimple_mean_tauresrat %f\n", result_19);
 	// double result_20= FC_LocalSimple_mean_stderr_CUDA(y,size,3);
 	// printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
     //double result_4 = SB_TransitionMatrix_3ac_sumdiagcov(y, size, autocorr_d);
     //printf("SB_TransitionMatrix_3ac_sumdiagcov : %f\n", result_4);
-        // double result_15 = hist5(y, size);
-	// printf("hist5 %f\n", result_15);
-    // double result_16 = hist10(y, size);
-	// printf("hist5 %f\n", result_16);
+
     // double sign = 1.0;
     // double result_17 = DN_OutlierInclude_np_001_mdrmd_CUDA(y, size, sign);
     // printf("The OutlierInclude_np_001_mdrmd is %f\n", result_17);
