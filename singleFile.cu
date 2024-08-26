@@ -2257,11 +2257,11 @@ double SB_MotifThree_quantile_hh(const double y[], const int size){
         for(int j=0;j<alphabet_size;j++){
             double ele = h_out2[i*alphabet_size + j];
             if(ele>0){
-                hh+=(ele)*log(ele);
+                hh+=2*(ele)*log(ele);
             }
         }
     }
-    return (-2)*hh;
+    return (-1)*hh;
 
 }
 
