@@ -2313,8 +2313,8 @@ int main() {
     printf("CO_trev_num1 : %.14f\n", result_2);
     double result_3 = CO_Embed2_Dist_tau_d_expfit_meandiff(y, size, autocorr_d);
     printf("CO_Embed2_Dist_tau_d_expfit_meandiff : %f\n", result_3);
-    // double result_21 = CO_HistogramAMI_even_2_5(y, size);
-	// printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
+    double result_21 = CO_HistogramAMI_even_2_5(y, size);
+	printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
 
 
     double result_5 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 2, "dfa");
@@ -2337,7 +2337,6 @@ int main() {
 	printf("motifthree %f\n", result_14);
     double result_13 = periodicity_wang(y, size);
 	printf("periodicity_wang %f\n", result_13);
-    //motifthree14
 
     // double result_15 = hist5(y, size);
 	// printf("hist5 %f\n", result_15);
