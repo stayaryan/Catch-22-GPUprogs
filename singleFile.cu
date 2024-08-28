@@ -1845,7 +1845,36 @@ __global__ void computeVarianceKernel(const double *res, int size, double mean, 
 	}
 }
 
-double FC_LocalSimple_mean_tauresrat_CUDA(const double y[], const int size, const int train_length, double *autocorr_d) {
+
+int co_firstzero_cuda(const double y[], const int size, const int maxtau) {
+	double *d_autocorrs;
+	int *d_zeroCrossingFlags;
+	int minIndex = maxtau;
+	double *x = cudaComputeAutocorrs(y,size);  		        // Allocate memory on the device
+	cudaMalloc((void **)&d_autocorrs, size * sizeof(double));
+	cudaMalloc((void **)&d_zeroCrossingFlags, size * sizeof(int));
+	// Copy data to the device
+	cudaMemcpy(d_autocorrs, x, size * sizeof(double), cudaMemcpyHostToDevice);
+	// Initialize zeroCrossingFlags with maxtau
+	cudaMemset(d_zeroCrossingFlags, maxtau, size * sizeof(int));
+	// Launch the findPotentialZeroCrossings kernel
+	int threadsPerBlock = 256;
+	int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
+	findPotentialZeroCrossings<<<blocksPerGrid, threadsPerBlock>>>(d_autocorrs, d_zeroCrossingFlags, size, maxtau);
+	// Reduce to find the minimum index
+	int numThreadsForReduce = 1024;  // Choose based on your device's capability
+	reduceMinIndex<<<1, numThreadsForReduce>>>(d_zeroCrossingFlags, size);
+	// Copy the result back to the host
+	cudaMemcpy(&minIndex, d_zeroCrossingFlags, sizeof(int), cudaMemcpyDeviceToHost);
+	// Free device memory
+	cudaFree(d_autocorrs);
+	cudaFree(d_zeroCrossingFlags);
+	return minIndex;
+}
+
+// Kernel to compute the variance of the residuals
+
+double FC_LocalSimple_mean_tauresrat_CUDA(const double y[], const int size, const int train_length) {
 	double *d_y, *d_res;
 	int *d_nanFlag;
 	int nanFlag = 0;
@@ -1862,27 +1891,27 @@ double FC_LocalSimple_mean_tauresrat_CUDA(const double y[], const int size, cons
 	nanCheckKernel<<<blocksPerGrid, threadsPerBlock>>>(d_y, size, d_nanFlag);
 	// Copy the nanFlag back to host and check
 	cudaMemcpy(&nanFlag, d_nanFlag, sizeof(int), cudaMemcpyDeviceToHost);
-	// if (nanFlag) {
-	// 	cudaFree(d_y);
-	// 	cudaFree(d_res);
-	// 	cudaFree(d_nanFlag);
-	// 	return NAN;  // Return if any NaN found
-	// }
+	if (nanFlag) {
+		cudaFree(d_y);
+		cudaFree(d_res);
+		cudaFree(d_nanFlag);
+		return NAN;  // Return if any NaN found
+	}
 	// Launch the computeResKernel
 	computeResKernel<<<blocksPerGrid, threadsPerBlock>>>(d_y, size, train_length, d_res);
 	// Copy res back to host
 	double *res = (double *)malloc((size - train_length) * sizeof(double));
 	cudaMemcpy(res, d_res, (size - train_length) * sizeof(double), cudaMemcpyDeviceToHost);
 	// Continue with the sequential part...
-	double resAC1stZ = co_firstzero(res, size - train_length, size - train_length, autocorr_d);
-	double yAC1stZ = co_firstzero(y, size, size, autocorr_d);  // This can be optimized further if y is large
+	double resAC1stZ = co_firstzero_cuda(res, size - train_length, size - train_length);
+	double yAC1stZ = co_firstzero_cuda(y, size, size);  // This can be optimized further if y is large
 	double output = resAC1stZ / yAC1stZ;
 	// This includes calls to co_firstzero and calculation of the final output.
 	// Free device memory
 	// cudaFree(d_y);
 	// cudaFree(d_res);
 	// cudaFree(d_nanFlag);
-	// // Free host memory
+	// Free host memory
 	// free(res);
 	// Return the final output (placeholder, replace with actual computation)
 	return output;
@@ -1910,14 +1939,14 @@ double FC_LocalSimple_mean_stderr_CUDA(const double y[], const int size, const i
 	// Launch kernels
 	nanCheckKernel<<<blocksPerGrid, threadsPerBlock>>>(d_y, size, d_nanFlag);
 	cudaMemcpy(&nanFlag, d_nanFlag, sizeof(int), cudaMemcpyDeviceToHost);
-	// if (nanFlag) {
-	// 	// cudaFree(d_y);
-	// 	// cudaFree(d_res);
-	// 	// cudaFree(d_mean);
-	// 	// cudaFree(d_variance);
-	// 	// cudaFree(d_nanFlag);
-	// 	return NAN;  // Return NaN if any NaNs found in the input
-	// }
+	if (nanFlag) {
+		cudaFree(d_y);
+		cudaFree(d_res);
+		cudaFree(d_mean);
+		cudaFree(d_variance);
+		cudaFree(d_nanFlag);
+		return NAN;  // Return NaN if any NaNs found in the input
+	}
 	computeResKernel<<<blocksPerGrid, threadsPerBlock>>>(d_y, size, train_length, d_res);
 	// Compute the mean of residuals
 	computeMeanKernel<<<blocksPerGrid, threadsPerBlock, sharedSize>>>(d_res, size - train_length, d_mean);
@@ -1929,11 +1958,11 @@ double FC_LocalSimple_mean_stderr_CUDA(const double y[], const int size, const i
 	cudaMemcpy(&variance, d_variance, sizeof(double), cudaMemcpyDeviceToHost);
 	stddev = sqrt(variance);
 	// Clean up
-	// cudaFree(d_y);
-	// cudaFree(d_res);
-	// cudaFree(d_mean);
-	// cudaFree(d_variance);
-	// cudaFree(d_nanFlag);
+	cudaFree(d_y);
+	cudaFree(d_res);
+	cudaFree(d_mean);
+	cudaFree(d_variance);
+	cudaFree(d_nanFlag);
 	return stddev;
 }
 __global__ void compute_y1_y2(double *d_y1, double *d_y2, const double *d_y, const int tau, const int n){
@@ -2305,7 +2334,7 @@ int main() {
     fclose(fp);
     double *autocorr_d = cuda_co_autocorrs(y, size);
 
-    int firstMinIndex = CO_FirstMin_ac_cuda(y, size, autocorr_d);
+    int firstMinIndex = CO_FirstMin_ac_cuda(y, size, autocorr_d); //result 22
     printf("CO_First_min: %d\n", firstMinIndex);
     float result_1 = CO_f1ecac_CUDA(autocorr_d, size);
     printf("CO_F1ecac : %f\n", result_1);
@@ -2333,30 +2362,34 @@ int main() {
 	printf("SB_BinaryStats_diff_longstretch1_CUDA %f\n", result_11);
     double result_12 = MD_hrv_classic_pnn40(y, size); //No need to print as it is already done in the function. The result will be shown below by the virue of the function.
     //printf("MD_hrv_classic_pnn40 %f\n", result_12);
-        double result_14 = SB_MotifThree_quantile_hh(y, size);
+    double result_19 = FC_LocalSimple_mean_tauresrat_CUDA(y, size, 1);
+	printf("FC_LocalSimple_mean_tauresrat %f\n", result_19);
+	double result_20= FC_LocalSimple_mean_stderr_CUDA(y, size, 3);
+	printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
+    double result_14 = SB_MotifThree_quantile_hh(y, size);
 	printf("motifthree %f\n", result_14);
-    double result_13 = periodicity_wang(y, size);
-	printf("periodicity_wang %f\n", result_13);
+
 
     // double result_15 = hist5(y, size);
 	// printf("hist5 %f\n", result_15);
     // double result_16 = hist10(y, size);
 	// printf("hist5 %f\n", result_16);
-    // double result_19 = FC_LocalSimple_mean_tauresrat_CUDA(y,size,1, autocorr_d);
-	// printf("FC_LocalSimple_mean_tauresrat %f\n", result_19);
-	// double result_20= FC_LocalSimple_mean_stderr_CUDA(y,size,3);
-	// printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
+    double result_13 = periodicity_wang(y, size);
+	printf("periodicity_wang %f\n", result_13);
     //double result_4 = SB_TransitionMatrix_3ac_sumdiagcov(y, size, autocorr_d);
     //printf("SB_TransitionMatrix_3ac_sumdiagcov : %f\n", result_4);
 
-    // double sign = 1.0;
+    // double sign = -1.0; //n
     // double result_17 = DN_OutlierInclude_np_001_mdrmd_CUDA(y, size, sign);
+    // printf("The OutlierInclude_np_001_mdrmd is %f\n", result_17);
+    // double sign = 1.0; //p
+    // double result_18 = DN_OutlierInclude_np_001_mdrmd_CUDA(y, size, sign);
     // printf("The OutlierInclude_np_001_mdrmd is %f\n", result_17);
 
 
     auto end = std::chrono::high_resolution_clock::now();
     durationUs = (std::chrono::duration_cast<std::chrono::nanoseconds>(end-start).count() / 10000.0);
-    printf("%lf", durationUs);
+    printf("%lf\n", durationUs);
     //cudaEventRecord(stop);
     //cudaEventSynchronize(stop);
     //float milliseconds = 0;
