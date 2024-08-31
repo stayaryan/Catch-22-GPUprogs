@@ -1671,10 +1671,10 @@ double hist5(double *h_data, const int size){
     // Printing the mode
     printf("The mode is: %f\n", mode);
     
-    cudaFree(d_data);
-    cudaFree(d_histCounts);
-    free(h_data);
-    free(h_histCounts);
+    // cudaFree(d_data);
+    // cudaFree(d_histCounts);
+    // free(h_data);
+    // free(h_histCounts);
     return 0;
 }
 double hist10(double *h_data, const int size){
@@ -1722,10 +1722,10 @@ double hist10(double *h_data, const int size){
     // Printing the mode
     printf("The mode is: %f\n", mode);
     
-    cudaFree(d_data);
-    cudaFree(d_histCounts);
-    free(h_data);
-    free(h_histCounts);
+    // cudaFree(d_data);
+    // cudaFree(d_histCounts);
+    // free(h_data);
+    // free(h_histCounts);
     return 0;
 }
 
@@ -2135,33 +2135,6 @@ double CO_HistogramAMI_even_2_5(const double y[], const int size)
 }
 
 
-__global__ void compute_yDown(double *d_yDown, double *d_yFilt, int nDown, int tau){
-    int idx = blockDim.x*blockIdx.x+threadIdx.x;
-    //yDown[i] = yFilt[i*tau];
-    if(idx<nDown){
-        d_yDown[idx] = d_yFilt[idx*tau];
-    }
-}
-__global__ void compute_yFilt(double *d_yFilt, const double *y, const int size){
-    int idx = blockIdx.x*blockDim.x+threadIdx.x;
-    if(idx<size){
-        d_yFilt[idx] = y[idx];
-    }
-}
-__global__ void divide_nDownminOne(double *d_T, const int divisor, const int numGroups){
-    int x = blockDim.x*blockIdx.x + threadIdx.x, y = blockDim.y*blockIdx.y + threadIdx.y;
-    if(x<numGroups && y<numGroups){
-        d_T[x*numGroups+y] = d_T[x*numGroups+y]/divisor;
-    }
-}
-__global__ void initialize_array(double *d_T, const int numGroups){
-    int x = threadIdx.x + blockIdx.x*blockDim.x, y = threadIdx.y + blockIdx.y*blockDim.y;
-    if(x<numGroups && y<numGroups){
-        d_T[x*numGroups+y] = 0.0;
-    }
-}
-
-
 __global__ void calc_words_len1(int *d_yt, int *d_r1, int *d_sizes_r1, int size, int alphabet_sizes){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i<alphabet_sizes){
@@ -2293,6 +2266,137 @@ double SB_MotifThree_quantile_hh(const double y[], const int size){
     return (-1)*hh;
 
 }
+__global__ void yfiltInit(double *d_y, double *d_yfilt, int size){
+    int i = threadIdx.x+blockDim.x *blockIdx.x;
+    if(i<size){
+        d_yfilt[i] = d_y[i];
+    }
+}
+__global__ void ynDownCalc(int nDown, double *d_yfilt, double *d_yDown, int tau){
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<nDown){
+        d_yDown[i] = d_yfilt[i*tau];
+    }
+}
+__global__ void calcT(int *d_yCG, double *d_T, int nDown, int numGroups){
+    int j = threadIdx.x + blockIdx.x * blockDim.x;
+    if(j<nDown-1){
+        d_T[(d_yCG[j]-1)*numGroups + (d_yCG[j+1]-1)]++;
+    }
+}
+__global__ void divNdown(int numGroups, int nDown, double *d_T){
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<numGroups){
+        for(int j=0;j<numGroups;j++){
+            d_T[i*numGroups + j]/=(nDown-1);
+        }
+    }
+}
+double SB_TransitionMatrix_3ac_sumdiagcov(const double y[], const int size){
+	double *d_y; cudaMalloc(&d_y, size*sizeof(double));
+    cudaMemcpy(d_y, y, size*sizeof(double), cudaMemcpyHostToDevice);
+    int *d_nanFlag;
+	int nanFlag = 0;
+	// Allocate memory on the device
+	cudaMalloc((void **)&d_nanFlag, sizeof(int));
+	// Copy data to the device
+	cudaMemset(d_nanFlag, 0, sizeof(int));
+	// Define kernel execution configuration
+	int threadsPerBlock = 256;
+	int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
+	//int sharedSize = threadsPerBlock * sizeof(double);
+
+	// Launch kernels
+
+	nanCheckKernel<<<blocksPerGrid, threadsPerBlock>>>(d_y, size, d_nanFlag);
+	cudaMemcpy(&nanFlag, d_nanFlag, sizeof(int), cudaMemcpyDeviceToHost);
+	if (nanFlag) {
+		cudaFree(d_nanFlag);
+		return NAN;  // Return NaN if any NaNs found in the input
+	}
+
+    int numGroups = 3;
+    int tau = co_firstzero_cuda(y, size, size);
+    //co_firstzero_cuda
+
+    //yfilt
+    double *h_yfilt = (double*)malloc(size*sizeof(double)), *d_yfilt; 
+    cudaMalloc(&d_yfilt, size*sizeof(double));
+    yfiltInit<<<blocksPerGrid, threadsPerBlock>>>(d_y, d_yfilt, size);
+    cudaMemcpy(h_yfilt, d_yfilt, size*sizeof(double), cudaMemcpyDeviceToHost);
+    // for(int i=0;i<size;i++){
+    //     printf("%.2f", h_yfilt[i]);
+    // }
+
+    int nDown = (size-1)/tau+1;
+    //
+    //printf("%d\n", nDown);
+    double *h_yDown = (double*)malloc(nDown * sizeof(double)), *d_yDown;
+    cudaMalloc(&d_yDown, nDown*sizeof(double));
+    ynDownCalc<<<blocksPerGrid, threadsPerBlock>>>(nDown, d_yfilt, d_yDown, tau);
+
+    cudaMemcpy(h_yDown, d_yDown, nDown*sizeof(double), cudaMemcpyDeviceToHost);
+    // for(int i=0;i<nDown;i++){
+    //     printf("%.2f", h_yDown[i]);
+    // }
+    int *h_yCG = (int*)malloc(nDown * sizeof(int)), *d_yCG;
+    cudaMalloc(&d_yCG, nDown * sizeof(int));
+    sb_coarsegrain(h_yDown, nDown, "quantile", numGroups, h_yCG);
+
+    cudaMemcpy(d_yCG, h_yCG, nDown * sizeof(int), cudaMemcpyHostToDevice);
+    // for(int i=0;i<nDown;i++){
+    //     printf("%d\t", h_yCG[i]);
+    // }
+    //t calculation
+    //numGroups = 3;
+    double *h_T = (double*)malloc((numGroups*numGroups)*sizeof(double)), *d_T;
+    cudaMalloc(&d_T, (numGroups*numGroups)*sizeof(double));
+    calcT<<<blocksPerGrid, threadsPerBlock>>>(d_yCG, d_T, nDown, numGroups);
+    cudaMemcpy(h_T, d_T, (numGroups*numGroups)*sizeof(double), cudaMemcpyDeviceToHost);
+    // for(int i=0;i<(numGroups*numGroups);i++){
+    //     printf("%.2f\t", h_T[i]);
+    // }
+    divNdown<<<blocksPerGrid, threadsPerBlock>>>(numGroups, nDown, d_T);
+    cudaMemcpy(h_T, d_T, (numGroups*numGroups)*sizeof(double), cudaMemcpyDeviceToHost);
+    // for(int i=0;i<(numGroups*numGroups);i++){
+    //     printf("%.9f\t", h_T[i]);
+    // }
+    double column1[3] = {0};
+    double column2[3] = {0};
+    double column3[3] = {0};
+    
+    for(int i = 0; i < numGroups; i++){
+        column1[i] = h_T[i*numGroups + 0];
+        column2[i] = h_T[i*numGroups + 1];
+        column3[i] = h_T[i*numGroups + 2];
+        //printf("%d\t%d\t%d\n", i*numGroups + 0, i*numGroups + 1, i*numGroups + 2);
+    }
+    // for(int i=0;i<numGroups;i++){
+    //     printf("%f\t%f\t%f\n", column1[i], column2[i], column3[i]);
+    // }
+    double *columns[3];
+    columns[0] = &(column1[0]);
+    columns[1] = &(column2[0]);
+    columns[2] = &(column3[0]);
+    
+    double COV[3][3];
+    double covTemp = 0;
+    for(int i = 0; i < numGroups; i++){
+        for(int j = i; j < numGroups; j++){
+            covTemp = cov(columns[i], columns[j], 3);
+            COV[i][j] = covTemp;
+            COV[j][i] = covTemp;
+        }
+    }
+    
+    double sumdiagcov = 0;
+    for(int i = 0; i < numGroups; i++){
+        sumdiagcov += COV[i][i];
+    }
+    // free(yFilt);free(yDown);free(yCG);
+    return sumdiagcov;
+
+}
 
 int main() {
     //cudaEvent_t start, stop;
@@ -2303,7 +2407,7 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     double *y = NULL;
     int size = 0;
-    FILE *fp = fopen("/home/aru/Catch-22-Matrix-Profile/modified_data.txt", "rb");
+    FILE *fp = fopen("/home/aru/Catch-22-Matrix-Profile/test.txt", "rb");
     if (!fp) {
         fprintf(stderr, "Failed to open the file.\n");
         return 1;
@@ -2334,50 +2438,50 @@ int main() {
     fclose(fp);
     double *autocorr_d = cuda_co_autocorrs(y, size);
 
-    int firstMinIndex = CO_FirstMin_ac_cuda(y, size, autocorr_d); //result 22
-    printf("CO_First_min: %d\n", firstMinIndex);
-    float result_1 = CO_f1ecac_CUDA(autocorr_d, size);
-    printf("CO_F1ecac : %f\n", result_1);
-    float result_2 = CO_trev_1_num_cuda(y, size);
-    printf("CO_trev_num1 : %.14f\n", result_2);
-    double result_3 = CO_Embed2_Dist_tau_d_expfit_meandiff(y, size, autocorr_d);
-    printf("CO_Embed2_Dist_tau_d_expfit_meandiff : %f\n", result_3);
-    double result_21 = CO_HistogramAMI_even_2_5(y, size);
-	printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
+    // int firstMinIndex = CO_FirstMin_ac_cuda(y, size, autocorr_d); //result 22
+    // printf("CO_First_min: %d\n", firstMinIndex);
+    // float result_1 = CO_f1ecac_CUDA(autocorr_d, size);
+    // printf("CO_F1ecac : %f\n", result_1);
+    // float result_2 = CO_trev_1_num_cuda(y, size);
+    // printf("CO_trev_num1 : %.14f\n", result_2);
+    // double result_3 = CO_Embed2_Dist_tau_d_expfit_meandiff(y, size, autocorr_d);
+    // printf("CO_Embed2_Dist_tau_d_expfit_meandiff : %f\n", result_3);
+    // double result_21 = CO_HistogramAMI_even_2_5(y, size);
+	// printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
 
 
-    double result_5 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 2, "dfa");
-    printf("SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1 : %f\n", result_5);
-    double result_6 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 1, "rsrangefit");
-    printf("SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1 : %f\n", result_6);
-    double result_7 = IN_AutoMutualInfoStats_40_gaussian_fmmi(y, size);
-    printf("IN_AutoMutualInfoStats_40_gaussian_fmmi : %f\n", result_7);
-    double result_8 = SP_Summaries_welch_rect_cuda(y, size, "area_5_1");
-    printf("Area under the first 1/5th of the spectrum: %f\n", result_8);
-    double result_9 = SP_Summaries_welch_rect_cuda(y, size, "centroid");
-    printf("Spectral Centroid: %f\n", result_9);
-    double result_10 = SB_BinaryStats_diff_longstretch0_CUDA(y, size);
-	printf("SB_BinaryStats_diff_longstretch0_CUDA %f\n", result_10);
-	double result_11 = SB_BinaryStats_diff_longstretch1_CUDA(y, size);
-	printf("SB_BinaryStats_diff_longstretch1_CUDA %f\n", result_11);
-    double result_12 = MD_hrv_classic_pnn40(y, size); //No need to print as it is already done in the function. The result will be shown below by the virue of the function.
-    //printf("MD_hrv_classic_pnn40 %f\n", result_12);
-    double result_19 = FC_LocalSimple_mean_tauresrat_CUDA(y, size, 1);
-	printf("FC_LocalSimple_mean_tauresrat %f\n", result_19);
-	double result_20= FC_LocalSimple_mean_stderr_CUDA(y, size, 3);
-	printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
-    double result_14 = SB_MotifThree_quantile_hh(y, size);
-	printf("motifthree %f\n", result_14);
+    // double result_5 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 2, "dfa");
+    // printf("SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1 : %f\n", result_5);
+    // double result_6 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 1, "rsrangefit");
+    // printf("SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1 : %f\n", result_6);
+    // double result_7 = IN_AutoMutualInfoStats_40_gaussian_fmmi(y, size);
+    // printf("IN_AutoMutualInfoStats_40_gaussian_fmmi : %f\n", result_7);
+    // double result_8 = SP_Summaries_welch_rect_cuda(y, size, "area_5_1");
+    // printf("Area under the first 1/5th of the spectrum: %f\n", result_8);
+    // double result_9 = SP_Summaries_welch_rect_cuda(y, size, "centroid");
+    // printf("Spectral Centroid: %f\n", result_9);
+    // double result_10 = SB_BinaryStats_diff_longstretch0_CUDA(y, size);
+	// printf("SB_BinaryStats_diff_longstretch0_CUDA %f\n", result_10);
+	// double result_11 = SB_BinaryStats_diff_longstretch1_CUDA(y, size);
+	// printf("SB_BinaryStats_diff_longstretch1_CUDA %f\n", result_11);
+    // double result_12 = MD_hrv_classic_pnn40(y, size); //No need to print as it is already done in the function. The result will be shown below by the virue of the function.
+    // //printf("MD_hrv_classic_pnn40 %f\n", result_12);
+    // double result_19 = FC_LocalSimple_mean_tauresrat_CUDA(y, size, 1);
+	// printf("FC_LocalSimple_mean_tauresrat %f\n", result_19);
+	// double result_20= FC_LocalSimple_mean_stderr_CUDA(y, size, 3);
+	// printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
+    // double result_14 = SB_MotifThree_quantile_hh(y, size);
+	// printf("motifthree %f\n", result_14);
 
 
     // double result_15 = hist5(y, size);
 	// printf("hist5 %f\n", result_15);
     // double result_16 = hist10(y, size);
 	// printf("hist5 %f\n", result_16);
-    double result_13 = periodicity_wang(y, size);
-	printf("periodicity_wang %f\n", result_13);
-    //double result_4 = SB_TransitionMatrix_3ac_sumdiagcov(y, size, autocorr_d);
-    //printf("SB_TransitionMatrix_3ac_sumdiagcov : %f\n", result_4);
+    // double result_13 = periodicity_wang(y, size);
+	// printf("periodicity_wang %f\n", result_13);
+    double result_4 = SB_TransitionMatrix_3ac_sumdiagcov(y, size);
+    printf("SB_TransitionMatrix_3ac_sumdiagcov : %.20f\n", result_4);
 
     // double sign = -1.0; //n
     // double result_17 = DN_OutlierInclude_np_001_mdrmd_CUDA(y, size, sign);
