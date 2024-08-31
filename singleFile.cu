@@ -2407,7 +2407,7 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     double *y = NULL;
     int size = 0;
-    FILE *fp = fopen("/home/aru/Catch-22-Matrix-Profile/test.txt", "rb");
+    FILE *fp = fopen("/home/aru/Catch-22-Matrix-Profile/modified_data.txt", "rb");
     if (!fp) {
         fprintf(stderr, "Failed to open the file.\n");
         return 1;
@@ -2438,58 +2438,58 @@ int main() {
     fclose(fp);
     double *autocorr_d = cuda_co_autocorrs(y, size);
 
-    // int firstMinIndex = CO_FirstMin_ac_cuda(y, size, autocorr_d); //result 22
-    // printf("CO_First_min: %d\n", firstMinIndex);
-    // float result_1 = CO_f1ecac_CUDA(autocorr_d, size);
-    // printf("CO_F1ecac : %f\n", result_1);
-    // float result_2 = CO_trev_1_num_cuda(y, size);
-    // printf("CO_trev_num1 : %.14f\n", result_2);
-    // double result_3 = CO_Embed2_Dist_tau_d_expfit_meandiff(y, size, autocorr_d);
-    // printf("CO_Embed2_Dist_tau_d_expfit_meandiff : %f\n", result_3);
-    // double result_21 = CO_HistogramAMI_even_2_5(y, size);
-	// printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
+    int firstMinIndex = CO_FirstMin_ac_cuda(y, size, autocorr_d); //result 22
+    printf("CO_First_min: %d\n", firstMinIndex);
+    float result_1 = CO_f1ecac_CUDA(autocorr_d, size);
+    printf("CO_F1ecac : %f\n", result_1);
+    float result_2 = CO_trev_1_num_cuda(y, size);
+    printf("CO_trev_num1 : %.14f\n", result_2);
+    double result_3 = CO_Embed2_Dist_tau_d_expfit_meandiff(y, size, autocorr_d);
+    printf("CO_Embed2_Dist_tau_d_expfit_meandiff : %f\n", result_3);
+    double result_21 = CO_HistogramAMI_even_2_5(y, size);
+	printf("CO_HistogramAMI_even_2_5 %f\n", result_21);
 
 
-    // double result_5 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 2, "dfa");
-    // printf("SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1 : %f\n", result_5);
-    // double result_6 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 1, "rsrangefit");
-    // printf("SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1 : %f\n", result_6);
-    // double result_7 = IN_AutoMutualInfoStats_40_gaussian_fmmi(y, size);
-    // printf("IN_AutoMutualInfoStats_40_gaussian_fmmi : %f\n", result_7);
-    // double result_8 = SP_Summaries_welch_rect_cuda(y, size, "area_5_1");
-    // printf("Area under the first 1/5th of the spectrum: %f\n", result_8);
-    // double result_9 = SP_Summaries_welch_rect_cuda(y, size, "centroid");
-    // printf("Spectral Centroid: %f\n", result_9);
-    // double result_10 = SB_BinaryStats_diff_longstretch0_CUDA(y, size);
-	// printf("SB_BinaryStats_diff_longstretch0_CUDA %f\n", result_10);
-	// double result_11 = SB_BinaryStats_diff_longstretch1_CUDA(y, size);
-	// printf("SB_BinaryStats_diff_longstretch1_CUDA %f\n", result_11);
-    // double result_12 = MD_hrv_classic_pnn40(y, size); //No need to print as it is already done in the function. The result will be shown below by the virue of the function.
-    // //printf("MD_hrv_classic_pnn40 %f\n", result_12);
-    // double result_19 = FC_LocalSimple_mean_tauresrat_CUDA(y, size, 1);
-	// printf("FC_LocalSimple_mean_tauresrat %f\n", result_19);
-	// double result_20= FC_LocalSimple_mean_stderr_CUDA(y, size, 3);
-	// printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
-    // double result_14 = SB_MotifThree_quantile_hh(y, size);
-	// printf("motifthree %f\n", result_14);
+    double result_5 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 2, "dfa");
+    printf("SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1 : %f\n", result_5);
+    double result_6 = SC_FluctAnal_2_50_1_logi_prop_r1(y, size, 1, "rsrangefit");
+    printf("SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1 : %f\n", result_6);
+    double result_7 = IN_AutoMutualInfoStats_40_gaussian_fmmi(y, size);
+    printf("IN_AutoMutualInfoStats_40_gaussian_fmmi : %f\n", result_7);
+    double result_8 = SP_Summaries_welch_rect_cuda(y, size, "area_5_1");
+    printf("Area under the first 1/5th of the spectrum: %f\n", result_8);
+    double result_9 = SP_Summaries_welch_rect_cuda(y, size, "centroid");
+    printf("Spectral Centroid: %f\n", result_9);
+    double result_10 = SB_BinaryStats_diff_longstretch0_CUDA(y, size);
+	printf("SB_BinaryStats_diff_longstretch0_CUDA %f\n", result_10);
+	double result_11 = SB_BinaryStats_diff_longstretch1_CUDA(y, size);
+	printf("SB_BinaryStats_diff_longstretch1_CUDA %f\n", result_11);
+    double result_12 = MD_hrv_classic_pnn40(y, size); //No need to print as it is already done in the function. The result will be shown below by the virue of the function.
+    //printf("MD_hrv_classic_pnn40 %f\n", result_12);
+    double result_19 = FC_LocalSimple_mean_tauresrat_CUDA(y, size, 1);
+	printf("FC_LocalSimple_mean_tauresrat %f\n", result_19);
+	double result_20= FC_LocalSimple_mean_stderr_CUDA(y, size, 3);
+	printf("FC_LocalSimple_mean_stderr_CUDA %f\n", result_20);
+    double result_14 = SB_MotifThree_quantile_hh(y, size);
+	printf("motifthree %f\n", result_14);
 
 
-    // double result_15 = hist5(y, size);
-	// printf("hist5 %f\n", result_15);
-    // double result_16 = hist10(y, size);
-	// printf("hist5 %f\n", result_16);
-    // double result_13 = periodicity_wang(y, size);
-	// printf("periodicity_wang %f\n", result_13);
+    double result_15 = hist5(y, size);
+	printf("hist5 %f\n", result_15);
+    double result_16 = hist10(y, size);
+	printf("hist10 %f\n", result_16);
+
     double result_4 = SB_TransitionMatrix_3ac_sumdiagcov(y, size);
     printf("SB_TransitionMatrix_3ac_sumdiagcov : %.20f\n", result_4);
 
+    double result_13 = periodicity_wang(y, size);
+	printf("periodicity_wang %f\n", result_13);
     // double sign = -1.0; //n
     // double result_17 = DN_OutlierInclude_np_001_mdrmd_CUDA(y, size, sign);
     // printf("The OutlierInclude_np_001_mdrmd is %f\n", result_17);
-    // double sign = 1.0; //p
+    // sign = 1.0; //p
     // double result_18 = DN_OutlierInclude_np_001_mdrmd_CUDA(y, size, sign);
     // printf("The OutlierInclude_np_001_mdrmd is %f\n", result_17);
-
 
     auto end = std::chrono::high_resolution_clock::now();
     durationUs = (std::chrono::duration_cast<std::chrono::nanoseconds>(end-start).count() / 10000.0);
